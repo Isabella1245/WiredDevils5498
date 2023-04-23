@@ -1,0 +1,51 @@
+This is for after you have wiped most of the laptops and you have a wiped robot.
+<<ONLY INSTALL ALL PROGRAMS AFTER KICKOFF>>
+
+1) Download WPILib -- https://docs.wpilib.org/en/stable/docs/zero-to-robot/step-2/wpilib-setup.html
+
+2) Download FRC Game Tools -- https://www.ni.com/en-us/support/downloads/drivers/download.frc-game-tools.html#440024
+
+3) Download external libraries
+    - This can include Talon SRX or Gyro libraries. 
+        - Talon SRX: Make sure you download phoenix framework software -- https://store.ctr-electronics.com/software/
+        - This might be blocked so you might need to use a hotspot through your phone
+    - This allows you to import the code to let you control robots or just even use hardware.
+  
+4) Image/Flash the Roborio (NOT ALWAYS NEEDED, BUT RECOMMENDED)
+    - Use the "Roborio Imaging Tool" that comes with the FRC Game Tools. 
+    - Make sure you plug in an ethernet cable and a printer cable directly from the computer to the roborio. (remove the router's ethernet)
+  
+5) Install new firmware onto the motors using "Phoenix Tuner" (NOT ALWAYS NEEDED, BUT RECOMMENDED)
+    - Keep the ethernet cord and printer cable plugged in and use "Phoenix Tuner"
+    - Click on run "Run Temporary Diagnostics Server"
+    - Then after it says it's ood, go to CAN Devices and choose the ID's that corresponds with the board.
+    - To update the firmware click on update all matching devices adn select the current year's firmware.
+  
+6) Create a new project by clicking on the W symbol in the top right (CTRL + SHIFT + P), then clicking "create new project"
+    - Choose Example, Java, then whatever drive you're using
+    - Make sure you create a new project folder and place it anywhere (desktop recommended)
+    - Also make sure that you put in your team number "5498"
+  
+7) Click on the W symbol in the top right again and select "Manage Vendor Libraries"
+    - Select "Install new libraries (offline)"
+    - Check off all of the libraries you want to have installed
+    - If you want to remove a library you can always use "Manage Current Libraries"
+  
+8) Disable firewalls for the FRC programs by going through the Windows Firewall applications
+    - Make sure that it's disabled for both private and public networks
+    - If you cannot connect to the roborio this is probably the reason
+  
+9) Code
+    - Object-Oriented Programming (NOT RECOMMENDED)
+        - << CODE IN Robot.java NOT Main.java >>
+        - Make sure you import what you want
+        - Also make sure the various statements are in the right classes
+    -Command-Based Programming 
+        - << Do not mess with Main.java >>
+        - when using code from other files, make sure you import that file
+        - make sure to import the correct libraries in each file
+        - << MAKE SURE YOU HAVE ROBOT CONTAINER >>
+    
+10) Type in the team number in the FRC Driver Station
+
+11) Make sure you are using SmartDashboard, not the driver station window
