@@ -1,0 +1,736 @@
+package frc.robot;
+
+import edu.wpi.first.wpilibj.Joystick;
+import edu.wpi.first.wpilibj.SPI;
+import edu.wpi.first.wpilibj.Servo;
+import edu.wpi.first.wpilibj.TimedRobot;
+import edu.wpi.first.wpilibj.Timer;
+import edu.wpi.first.wpilibj.motorcontrol.MotorControllerGroup;
+import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import edu.wpi.first.wpilibj.AnalogPotentiometer;
+
+import edu.wpi.first.cameraserver.CameraServer;
+import edu.wpi.first.cscore.UsbCamera;
+
+import com.ctre.phoenix.motorcontrol.can.WPI_TalonSRX; //Talon Motor import
+
+import com.kauailabs.navx.frc.AHRS; //Gyro import
+
+/*
+[Lower Controller]
+Left Joystick: Forward/Backward Movement
+Right Joystick:
+A Button:
+B Button:
+X Button:
+Y Button:
+Left Trigger: Turning Left
+Right Trigger: Turning Right
+Left & Right Bumper:
+Back Button:
+Start Button:
+
+[Upper Controller]
+Left Joystick: Mast Extension
+Right Joystick: Mast Angle
+A Button:
+B Button:
+X Button:
+Y Button:
+Left Trigger: Delivery Backward
+Right Trigger: Delivery Forward
+Left & Right Bumper: Activates Manual Mast mode
+Back Button: Enables auto-brake in climbing
+Start Button: Enables/Disables Automatic Mast Extensions
+*/
+
+public class Robot extends TimedRobot {
+
+  WPI_TalonSRX motorLeft1 = new WPI_TalonSRX(0);
+  WPI_TalonSRX motorLeft2 = new WPI_TalonSRX(1);
+  WPI_TalonSRX motorRight1 = new WPI_TalonSRX(14);
+  WPI_TalonSRX motorRight2 = new WPI_TalonSRX(15);
+
+  WPI_TalonSRX climber1 = new WPI_TalonSRX(2);
+  WPI_TalonSRX climber2 = new WPI_TalonSRX(13);
+
+  WPI_TalonSRX climberAngle1 = new WPI_TalonSRX(4);
+  WPI_TalonSRX climberAngle2 = new WPI_TalonSRX(11);
+
+  WPI_TalonSRX delivery = new WPI_TalonSRX(12);
+  WPI_TalonSRX intake = new WPI_TalonSRX(3);
+
+  MotorControllerGroup leftGroup = new MotorControllerGroup(motorLeft1, motorLeft2);
+  MotorControllerGroup rightGroup = new MotorControllerGroup(motorRight1, motorRight2);
+
+  Joystick lower_xboxController = new Joystick(0);
+  Joystick upper_xboxController = new Joystick(1);
+
+  AnalogPotentiometer potMast = new AnalogPotentiometer(0, 3600, -100);
+  AnalogPotentiometer potAngle1 = new AnalogPotentiometer(1, 3600, -100);
+  AnalogPotentiometer potAngle2 = new AnalogPotentiometer(2, 3600, -100);
+
+  Servo intakeRelease = new Servo(0);
+
+  public final SendableChooser<Integer> autonChooser = new SendableChooser<Integer>();
+
+  //Auton
+    int auton;
+
+  //Controller Buttons
+    double lower_left_trigger, lower_right_trigger;
+    boolean lower_Abutton, lower_Bbutton, lower_Xbutton, lower_Ybutton;
+    boolean lower_right_bumper, lower_left_bumper;
+    boolean lower_back_button, lower_start_button; 
+    int lower_pov; // -1: off, 0-360 degrees (45 increments)
+
+    double lower_xAxisLeft, lower_yAxisLeft; // up is negative while down is postive
+    double lower_xAxisRight, lower_yAxisRight;
+
+    double upper_left_trigger, upper_right_trigger;
+    boolean upper_Abutton, upper_Bbutton, upper_Xbutton, upper_Ybutton;
+    boolean upper_right_bumper, upper_left_bumper;
+    boolean upper_back_button, upper_start_button; 
+    int upper_pov; // -1: off, 0-360 degrees (45 increments)
+
+    double upper_xAxisLeft, upper_yAxisLeft; // up is negative while down is postive
+    double upper_xAxisRight, upper_yAxisRight;
+
+    double lower_yAxisLeft_slowSpeed, lower_yAxisRight_slowSpeed;
+    double lower_xAxisLeft_slowSpeed, lower_xAxisRight_slowSpeed;
+    double lower_right_trigger_slowSpeed, lower_left_trigger_slowSpeed;
+
+    double upper_yAxisLeft_slowSpeed, upper_yAxisRight_slowSpeed;
+    double upper_xAxisLeft_slowSpeed, upper_xAxisRight_slowSpeed;
+    double upper_right_trigger_slowSpeed, upper_left_trigger_slowSpeed;
+
+    double lower_yAxisLeft_hyperdrive, lower_yAxisRight_hyperdrive;
+    double lower_xAxisLeft_hyperdrive, lower_xAxisRight_hyperdrive;
+    double lower_right_trigger_hyperdrive, lower_left_trigger_hyperdrive;
+
+    double upper_yAxisLeft_hyperdrive, upper_yAxisRight_hyperdrive;
+    double upper_xAxisLeft_hyperdrive, upper_xAxisRight_hyperdrive;
+    double upper_right_trigger_hyperdrive, upper_left_trigger_hyperdrive;
+  //
+  
+  //Speeds
+  double deadband = 0.05;
+  double normalSpeed = 0.6;
+  double babySpeed = normalSpeed / 2;
+  double hyperdrive = normalSpeed * 2;
+
+  //Logic
+  int movement = 0;
+  double filler = 0.0;
+  double motorInput = 0.0f;
+  double distToValue = 0.0f;
+  double desiredValue = 0;
+  double potAngleDiff = 0.0;
+
+  //Booleans
+  boolean mastEnabled = false;
+  boolean manualMast = false;
+  boolean isClimbingAuto = false;
+  boolean readingValues = true;
+  boolean isExtending = false;
+  boolean isGoing = false;
+  boolean pidOn = false;
+  boolean isHyperdrive = false;
+
+  //Stating
+  Timer timer = new Timer();
+  AHRS gyro = new AHRS(SPI.Port.kMXP);
+
+  @Override
+  public void robotInit() {
+    leftGroup.setInverted(true);
+    timer.reset();
+    timer.start();
+    
+    UsbCamera camera = CameraServer.startAutomaticCapture();
+    camera.setResolution(360, 240);
+    camera.setFPS(30);
+    camera.setExposureManual(50);
+
+    autonChooser.setDefaultOption("One-Ball", 1);
+    autonChooser.addOption("One-Ball Delayed", 6);
+    autonChooser.addOption("Left Side", 2);
+    autonChooser.addOption("Right Side", 3);
+    autonChooser.addOption("Left Side Delayed", 4);
+    autonChooser.addOption("Right Side Delayed", 5);
+
+    SmartDashboard.putData(autonChooser);
+  }
+
+  @Override
+  public void teleopPeriodic() {
+    ReadJoystick();
+    ReadSensors();
+    Calculations();
+    MoveLower();
+    MoveUpper();
+  }
+
+  public void ReadJoystick() {
+    lower_Xbutton = lower_xboxController.getRawButton(3);
+    lower_Ybutton = lower_xboxController.getRawButton(4);
+    lower_Bbutton = lower_xboxController.getRawButton(2);
+    lower_Abutton = lower_xboxController.getRawButton(1);
+    lower_right_bumper = lower_xboxController.getRawButton(6);
+    lower_left_bumper = lower_xboxController.getRawButton(5);
+    lower_back_button = lower_xboxController.getRawButton(7);
+    lower_start_button = lower_xboxController.getRawButton(8);
+
+    lower_left_trigger = lower_xboxController.getRawAxis(2);
+    lower_right_trigger = lower_xboxController.getRawAxis(3);
+    lower_xAxisLeft = lower_xboxController.getRawAxis(0);
+    lower_yAxisLeft = -lower_xboxController.getRawAxis(1); // Flipping the sign for y axis
+    lower_xAxisRight = lower_xboxController.getRawAxis(4);
+    lower_yAxisRight = -lower_xboxController.getRawAxis(5); // Flipping the sign for y axis
+    lower_pov = lower_xboxController.getPOV();
+
+    upper_Xbutton = upper_xboxController.getRawButton(3);
+    upper_Ybutton = upper_xboxController.getRawButton(4);
+    upper_Bbutton = upper_xboxController.getRawButton(2);
+    upper_Abutton = upper_xboxController.getRawButton(1);
+    upper_right_bumper = upper_xboxController.getRawButton(6);
+    upper_left_bumper = upper_xboxController.getRawButton(5);
+    upper_back_button = upper_xboxController.getRawButton(7);
+    upper_start_button = upper_xboxController.getRawButton(8);
+
+    upper_left_trigger = upper_xboxController.getRawAxis(2);
+    upper_right_trigger = upper_xboxController.getRawAxis(3);
+    upper_xAxisLeft = upper_xboxController.getRawAxis(0);
+    upper_yAxisLeft = -upper_xboxController.getRawAxis(1); // Flipping the sign for y axis
+    upper_xAxisRight = upper_xboxController.getRawAxis(4);
+    upper_yAxisRight = -upper_xboxController.getRawAxis(5); // Flipping the sign for y axis
+    upper_pov = upper_xboxController.getPOV();
+  }
+  
+  public void Calculations() {
+    lower_yAxisLeft_slowSpeed = lower_yAxisLeft * normalSpeed;
+    lower_xAxisLeft_slowSpeed = lower_xAxisLeft * normalSpeed;
+    lower_yAxisRight_slowSpeed = lower_yAxisRight * normalSpeed;
+    lower_xAxisRight_slowSpeed = lower_xAxisRight * normalSpeed;
+    lower_right_trigger_slowSpeed = lower_right_trigger * normalSpeed;
+    lower_left_trigger_slowSpeed = lower_left_trigger * normalSpeed;
+
+    upper_yAxisLeft_slowSpeed = upper_yAxisLeft * normalSpeed;
+    upper_xAxisLeft_slowSpeed = upper_xAxisLeft * normalSpeed;
+    upper_yAxisRight_slowSpeed = upper_yAxisRight * normalSpeed;
+    upper_xAxisRight_slowSpeed = upper_xAxisRight * normalSpeed;
+    upper_right_trigger_slowSpeed = upper_right_trigger * normalSpeed;
+    upper_left_trigger_slowSpeed = upper_left_trigger * normalSpeed;
+
+    lower_yAxisLeft_hyperdrive = lower_yAxisLeft * hyperdrive;
+    lower_xAxisLeft_hyperdrive = lower_xAxisLeft * hyperdrive;
+    lower_yAxisRight_hyperdrive = lower_yAxisRight * hyperdrive;
+    lower_xAxisRight_hyperdrive = lower_xAxisRight * hyperdrive;
+    lower_right_trigger_hyperdrive = lower_right_trigger * hyperdrive;
+    lower_left_trigger_hyperdrive = lower_left_trigger * hyperdrive;
+
+    upper_yAxisLeft_hyperdrive = upper_yAxisLeft * hyperdrive;
+    upper_xAxisLeft_hyperdrive = upper_xAxisLeft * hyperdrive;
+    upper_yAxisRight_hyperdrive = upper_yAxisRight * hyperdrive;
+    upper_xAxisRight_hyperdrive = upper_xAxisRight * hyperdrive;
+    upper_right_trigger_hyperdrive = upper_right_trigger * hyperdrive;
+    upper_left_trigger_hyperdrive = upper_left_trigger * hyperdrive;
+
+    potAngleDiff = potAngle1.get() - potAngle2.get();
+  }
+
+  public void ReadSensors() {
+    if(readingValues) {
+      //System.out.println("potMast: " + potMast.get());
+      //System.out.println("mast: " + climber1.get());
+      //System.out.println("potAngle2: " + potAngle2.get());
+      //System.out.println("potAngle1: " + potAngle1.get());
+      //System.out.println(potAngleDiff);
+    } else {}
+  }
+
+  public void MoveLower() {
+
+    //Backend else
+    if(
+      (lower_yAxisLeft < deadband && lower_yAxisLeft > -deadband)
+      && (lower_yAxisRight < deadband && lower_yAxisRight > -deadband)
+      && (lower_xAxisLeft < deadband && lower_xAxisLeft > -deadband)
+      && (lower_xAxisRight < deadband && lower_xAxisRight > -deadband)
+      && (lower_left_trigger < deadband && lower_right_trigger < deadband)
+      && (!lower_Abutton && !lower_Bbutton && !lower_Xbutton && !lower_Ybutton)
+      && (lower_pov == -1)
+      && (!lower_right_bumper && !lower_left_bumper)
+      && (!lower_back_button && !lower_start_button)
+      )
+    {rightGroup.set(0); leftGroup.set(0); //System.out.println("Lower Stopped");
+  } else {
+      
+
+
+
+    //Hyperdrive toggle
+      if(lower_Abutton) {
+        isHyperdrive = true;
+      } else {
+        isHyperdrive = false;
+      }
+
+      //Temp Debug
+      if(lower_start_button && timer.get() > 0.5) {
+        timer.reset();
+        System.out.println("MotorLeft1 Temp: " + ((motorLeft1.getTemperature() * 1.8) + 32) + "F");
+        System.out.println("MotorLeft2 Temp: " + ((motorLeft2.getTemperature() * 1.8) + 32) + "F");
+        System.out.println("MotorRight1 Temp: " + ((motorRight1.getTemperature() * 1.8) + 32) + "F");
+        System.out.println("MotorRight2 Temp: " + ((motorRight2.getTemperature() * 1.8) + 32) + "F");
+      } else {}
+ 
+      //turning while moving backward
+      if((lower_right_trigger > deadband && lower_left_trigger < deadband) && lower_yAxisLeft < -deadband) {
+        leftGroup.set(lower_right_trigger_slowSpeed*1.5);
+        rightGroup.set(-lower_right_trigger_slowSpeed*1.5);
+        System.out.println("Turning Right Backward");
+      } else if (lower_left_trigger > deadband && lower_right_trigger < deadband && lower_yAxisLeft < -deadband) {
+        leftGroup.set(-lower_left_trigger_slowSpeed*1.5);
+        rightGroup.set(lower_left_trigger_slowSpeed*1.5);
+        System.out.println("Turning Left Backward");
+      //turning while moving forward
+      } else if(lower_right_trigger > deadband && lower_left_trigger < deadband && lower_yAxisLeft > deadband) {
+        leftGroup.set(lower_right_trigger_slowSpeed*1.5);
+        rightGroup.set(-lower_right_trigger_slowSpeed*1.5);
+        System.out.println("Turning Right Forward");
+      } else if (lower_left_trigger > deadband && lower_right_trigger < deadband && lower_yAxisLeft > deadband) {
+        leftGroup.set(-lower_left_trigger_slowSpeed*1.5);
+        rightGroup.set(lower_left_trigger_slowSpeed*1.5);
+        System.out.println("Turning Left Forward");
+      //turning in spot
+      } else if (lower_right_trigger > deadband && lower_left_trigger < deadband) {
+        leftGroup.set(lower_right_trigger_slowSpeed*1.5);
+        rightGroup.set(-lower_right_trigger_slowSpeed*1.5);
+        System.out.println("Turning Right in spot");
+      } else if (lower_left_trigger > deadband && lower_right_trigger < deadband) {
+        leftGroup.set(-lower_left_trigger_slowSpeed*1.5);
+        rightGroup.set(lower_left_trigger_slowSpeed*1.5);
+        System.out.println("Turning Left in spot");
+      } else {
+
+        //forward moving (hyperdrive)
+        if(isHyperdrive && (lower_yAxisLeft > deadband || lower_yAxisLeft < -deadband)) {
+          leftGroup.set(lower_yAxisLeft_hyperdrive);
+          rightGroup.set(lower_yAxisLeft_hyperdrive);
+          System.out.println("Forward/Backward Hyperdrive");
+        //forward moving (slowSpeed)
+        } else if(lower_yAxisLeft > deadband || lower_yAxisLeft < -deadband) {
+          leftGroup.set(lower_yAxisLeft_slowSpeed);
+          rightGroup.set(lower_yAxisLeft_slowSpeed);
+          System.out.println("Forward/Backward");
+        } else {}
+      }
+    }
+  }
+
+  public void MoveUpper() {
+   
+    //Backend else
+    if(
+      (upper_yAxisLeft < deadband && upper_yAxisLeft > -deadband)
+      && (upper_yAxisRight < deadband && upper_yAxisRight > -deadband)
+      && (upper_xAxisLeft < deadband && upper_xAxisLeft > -deadband)
+      && (upper_xAxisRight < deadband && upper_xAxisRight > -deadband)
+      && (upper_left_trigger < deadband && upper_right_trigger < deadband)
+      && (!upper_Abutton && !upper_Bbutton && !upper_Xbutton && !upper_Ybutton)
+      && (upper_pov == -1)
+      && (!upper_right_bumper && !upper_left_bumper)
+      && (!upper_back_button && !upper_start_button)
+      )
+    {climber1.set(0); climber2.set(0); climberAngle1.set(0); climberAngle2.set(0); delivery.set(0); intake.set(0); //System.out.println("Upper Stopped");
+  } else {
+
+    //Temp Debug
+    if(upper_start_button && timer.get() > 0.5) {
+      timer.reset();
+      System.out.println("Climber1 Temp: " + ((climber1.getTemperature() * 1.8) + 32) + "F");
+      System.out.println("Climber2 Temp: " + ((climber2.getTemperature() * 1.8) + 32) + "F");
+      System.out.println("ClimberAngle1 Temp: " + ((climberAngle1.getTemperature() * 1.8) + 32) + "F");
+      System.out.println("ClimberAngle2 Temp: " + ((climberAngle2.getTemperature() * 1.8) + 32) + "F");
+      System.out.println("Delivery Temp: " + ((delivery.getTemperature() * 1.8) + 32) + "F");
+      System.out.println("Intake Temp: " + ((intake.getTemperature() * 1.8) + 32) + "F");
+    } else {}
+
+      //intake
+      if(upper_Abutton) {
+        intake.set(0.5);
+      } else if(upper_Ybutton) {
+        intake.set(-0.5);
+      } else {
+        intake.set(0);
+      }
+      
+      //delivery
+      if(upper_Bbutton) {
+        delivery.set(0.9);
+        System.out.println("Delivering Ball");
+      } else if(upper_Xbutton) {
+        delivery.set(-0.9);
+        System.out.println("Reversing Delivery");
+      } else {
+        delivery.set(0);
+      }
+
+      //slow delivery
+      if(upper_right_trigger > deadband) {
+        delivery.set(upper_right_trigger * 0.5);
+        System.out.println("Slow Delivery");
+      } else if(upper_left_trigger > deadband) {
+        delivery.set(-upper_left_trigger * 0.5);
+        System.out.println("Slow Delivery Reverse");
+      } else {}
+
+      //Toggle for enabling manual mast mode
+      if(upper_right_bumper == true){
+        manualMast = true;
+        System.out.println("on");
+      } else if(upper_right_bumper == true) {
+        manualMast = false;
+        System.out.println("off");
+      }
+
+      if(manualMast) {
+        
+        //mast extension controls
+         if(potMast.get() < 50 && (upper_yAxisLeft > deadband || upper_yAxisLeft < -deadband)) {
+          climber1.set(0);
+          climber2.set(0);
+          System.out.println("Reached Minimum");
+        } else if(potMast.get() > 3600 && (upper_yAxisLeft > deadband || upper_yAxisLeft < -deadband)) {
+          climber1.set(0);
+          climber2.set(0);
+          System.out.println("Reached Maximum");
+        } else if(upper_yAxisLeft < -deadband){
+          climber1.set(-upper_yAxisLeft);
+          climber2.set(upper_yAxisLeft);
+          System.out.println("Retracting Mast");
+        } else if(upper_yAxisLeft > deadband) {
+          climber1.set(-upper_yAxisLeft*0.6);
+          climber2.set(upper_yAxisLeft*0.6);
+          System.out.println("Extending Mast");
+        } else {
+          climber1.set(0);
+          climber2.set(0);
+        }
+              //mast rotation controls
+
+              //forward adjust
+              if(upper_yAxisRight > deadband && potAngleDiff > 5 && (potAngle1.get() < 1100)) {
+                climberAngle1.set(-((upper_yAxisRight/3)));
+                climberAngle2.set(-((upper_yAxisRight/3) + deadband));
+                System.out.println("Turning Angle Forward ");
+              //forward adjust
+              } else if(upper_yAxisRight > deadband && potAngleDiff < -5 && (potAngle1.get() < 1100)) {
+                climberAngle1.set(-((upper_yAxisRight/3) + deadband));
+                climberAngle2.set(-((upper_yAxisRight/3)));
+                System.out.println("Turning Angle Forward ");
+              //forward normal
+              } else if(upper_yAxisRight > deadband && (potAngleDiff < 5 && potAngleDiff > -5) && (potAngle1.get() < 1100)) {
+                climberAngle1.set(-((upper_yAxisRight/3)));
+                climberAngle2.set(-((upper_yAxisRight/3)));
+                System.out.println("Turning Angle Forward ");
+              //backward adjust
+              } else if(upper_yAxisRight < -deadband && potAngleDiff < -5 && (potAngle1.get() > 60 && potAngle2.get() > 60)) {
+                climberAngle1.set(-((upper_yAxisRight/3) + deadband));
+                climberAngle2.set(-((upper_yAxisRight/3)));
+                System.out.println("Turning Angle Back");
+              //backward adjust
+              } else if(upper_yAxisRight < -deadband && potAngleDiff > 5 && (potAngle1.get() > 60 && potAngle2.get() > 60)) {
+                climberAngle1.set(-((upper_yAxisRight/3)));
+                climberAngle2.set(-((upper_yAxisRight/3) + deadband));
+                System.out.println("Turning Angle Back");
+              //backward normal
+              } else if(upper_yAxisRight < -deadband && potAngleDiff < 5 && potAngleDiff > -100 && (potAngle1.get() > 60 && potAngle2.get() > 60)) {
+                climberAngle1.set(-((upper_yAxisRight/3)));
+                climberAngle2.set(-((upper_yAxisRight/3)));
+                System.out.println("Turning Angle Back");
+              //forward slow adjust
+              } else if(upper_yAxisRight > deadband && potAngleDiff > 5 && (potAngle1.get() < 1400 && potAngle1.get() > 1100)) {
+                climberAngle1.set(-((upper_yAxisRight/5)));
+                climberAngle2.set(-((upper_yAxisRight/5) + deadband));
+                System.out.println("Turning Angle Forward slow");
+              //forward slow adjust
+              } else if(upper_yAxisRight > deadband && potAngleDiff < -5 && (potAngle1.get() < 1400 && potAngle1.get() > 1100)) {
+                climberAngle1.set(-((upper_yAxisRight/5) + deadband));
+                climberAngle2.set(-((upper_yAxisRight/5)));
+                System.out.println("Turning Angle Forward slow");
+              //forward slow
+              } else if(upper_yAxisRight > deadband && potAngleDiff < 5 && potAngleDiff > -100 && (potAngle1.get() < 1400 && potAngle1.get() > 1100)) {
+                climberAngle1.set(-((upper_yAxisRight/5)));
+                climberAngle2.set(-((upper_yAxisRight/5)));
+                System.out.println("Turning Angle Forward slow ");
+              } else {}
+
+        if(upper_left_bumper) {
+          climber1.set(deadband);
+          climber2.set(-deadband);
+        } else {}
+
+      }
+    }
+
+    }
+  
+  @Override
+  public void autonomousInit() {
+    timer.reset();
+    timer.start();
+
+    auton = autonChooser.getSelected();
+
+    //Left & Right side are orientated from the perspective of the hub
+    //auton 1 = start against hub, deliver then leave tarmac
+    //auton 2 = [Left Side] Start between hub and ball, pick up ball then deliver both, then leave tarmac
+    //auton 3 = [Right Side] Start between hub and ball, pick up ball then deliver both, then leave tarmac
+    //auton 4 = [Left Side (DELAYED 3s)] Start between hub and ball, pick up ball then deliver both, then leave tarmac
+    //auton 5 = [Right Side (DELAYED 3s)]Start between hub and ball, pick up ball then deliver both, then leave tarmac
+    //auton 6 = [Against Hub (DELAYED 5s)] One Ball
+  }  
+
+  @Override
+  public void autonomousPeriodic() {
+    
+    if(auton == 1) {
+      //instant deliver and out
+      if(timer.get() < 1.4) { 
+        delivery.set(0.8);
+      } else if(timer.get() >= 1.4 && timer.get() < 2.8) {
+        leftGroup.set(0.45);
+        rightGroup.set(0.45); 
+        delivery.set(0);
+      } else {
+        leftGroup.set(0);
+        rightGroup.set(0); 
+      }
+    } else if(auton == 2) {
+      //[Left Side] Start between hub and ball, pick up ball then deliver both, then leave tarmac
+        
+      if(timer.get() < 0.5) {
+        // jolt backwards to drop intake arm and start intake
+        leftGroup.set(-1);
+        rightGroup.set(-1);
+        intake.set(0.7);
+        delivery.set(0.2);
+        System.out.println("Running Step 1...");
+      } else if(timer.get() < 1.5) {
+        //drive forward
+        leftGroup.set(0.65);
+        rightGroup.set(0.6);
+        delivery.set(0);
+        System.out.println("Running Step 2...");
+      } else if(timer.get() < 4.2) {
+        //pause 
+        leftGroup.set(0);
+        rightGroup.set(0);
+        System.out.println("Running Step 3...");
+      } else if(timer.get() < 5.5) {
+        //backwards straight
+        leftGroup.set(-0.5);
+        rightGroup.set(-0.65);
+        System.out.println("Running Step 4...");
+      } else if(timer.get() < 6.5) {
+        //backwards straight
+        leftGroup.set(0);
+        rightGroup.set(0);
+        System.out.println("Running Step 5...");
+      } else if(timer.get() < 8.9) {
+        //stop at hub, deliver balls
+        leftGroup.set(0);
+        rightGroup.set(0);
+        delivery.set(0.8);
+        System.out.println("Running Step 6...");
+      } else if(timer.get() < 9.9) {
+        //drive out off the tarmac
+        leftGroup.set(0.6);
+        rightGroup.set(0.6);
+        delivery.set(0);
+        intake.set(0);
+        System.out.println("Running Step 7...");
+      } else if (timer.get() > 9.9){
+        leftGroup.set(0);
+        rightGroup.set(0);
+        System.out.println("Finished");
+      }
+    } else if(auton == 3) {
+      //[Right Side] Start between hub and ball, pick up ball then deliver both, then leave tarmac
+        if(timer.get() < 0.5) {
+        // jolt backwards to drop intake arm and start intake
+        leftGroup.set(-1);
+        rightGroup.set(-1);
+        intake.set(0.7);
+        delivery.set(0.2);
+        System.out.println("Running Step 1...");
+      } else if(timer.get() < 1.5) {
+        //drive forward
+        leftGroup.set(0.65);
+        rightGroup.set(0.6);
+        delivery.set(0);
+        System.out.println("Running Step 2...");
+      } else if(timer.get() < 4.2) {
+        //pause 
+        leftGroup.set(0);
+        rightGroup.set(0);
+        System.out.println("Running Step 3...");
+      } else if(timer.get() < 5.5) {
+        //backwards straight
+        leftGroup.set(-0.60);
+        rightGroup.set(-0.5);
+        System.out.println("Running Step 4...");
+      } else if(timer.get() < 6.5) {
+        //drift to hub
+        leftGroup.set(0);
+        rightGroup.set(0);
+        System.out.println("Running Step 5...");
+      } else if(timer.get() < 8.9) {
+        //stop at hub, deliver balls
+        leftGroup.set(0);
+        rightGroup.set(0);
+        delivery.set(0.8);
+        System.out.println("Running Step 6...");
+      } else if(timer.get() < 9.9) {
+        //drive out off the tarmac
+        leftGroup.set(0.6);
+        rightGroup.set(0.6);
+        delivery.set(0);
+        intake.set(0);
+        System.out.println("Running Step 7...");
+      } else if (timer.get() > 9.9){
+        leftGroup.set(0);
+        rightGroup.set(0);
+        System.out.println("Finished");
+      }
+    } else if(auton == 2) {
+      //[Left Side (DELAYED 3s)] Start between hub and ball, pick up ball then deliver both, then leave tarmac
+      if(timer.get() < 3) {
+        //waiting
+        leftGroup.set(0);
+        rightGroup.set(0);
+        delivery.set(0);
+        System.out.println("Running Step 1...");
+      } else if(timer.get() < 3.5) {
+        // jolt backwards to drop intake arm and start intake
+        leftGroup.set(-1);
+        rightGroup.set(-1);
+        intake.set(0.7);
+        delivery.set(0.2);
+        System.out.println("Running Step 2...");
+      } else if(timer.get() < 4.5) {
+        //drive forward
+        leftGroup.set(0.65);
+        rightGroup.set(0.6);
+        delivery.set(0);
+        System.out.println("Running Step 3...");
+      } else if(timer.get() < 7.2) {
+        //pause 
+        leftGroup.set(0);
+        rightGroup.set(0);
+        System.out.println("Running Step 4...");
+      } else if(timer.get() < 8.5) {
+        //backwards straight
+        leftGroup.set(-0.5);
+        rightGroup.set(-0.65);
+        System.out.println("Running Step 5...");
+      } else if(timer.get() < 9.5) {
+        //backwards straight
+        leftGroup.set(0);
+        rightGroup.set(0);
+        System.out.println("Running Step 6...");
+      } else if(timer.get() < 11.9) {
+        //stop at hub, deliver balls
+        leftGroup.set(0);
+        rightGroup.set(0);
+        delivery.set(0.8);
+        System.out.println("Running Step 7...");
+      } else if(timer.get() < 12.9) {
+        //drive out off the tarmac
+        leftGroup.set(0.6);
+        rightGroup.set(0.6);
+        delivery.set(0);
+        intake.set(0);
+        System.out.println("Running Step 8...");
+      } else if (timer.get() > 12.9){
+        leftGroup.set(0);
+        rightGroup.set(0);
+        System.out.println("Finished");
+      }
+    } else if(auton == 5) {
+      //[Right Side (DELAYED 3s)] Start between hub and ball, pick up ball then deliver both, then leave tarmac
+        if(timer.get() < 3) {
+        //waiting
+        leftGroup.set(0);
+        rightGroup.set(0);
+        System.out.println("Running Step 1...");
+        } else if(timer.get() < 3.5) {
+        // jolt backwards to drop intake arm and start intake
+        leftGroup.set(-1);
+        rightGroup.set(-1);
+        intake.set(0.7);
+        delivery.set(0.2);
+        System.out.println("Running Step 2...");
+      } else if(timer.get() < 4.5) {
+        //drive forward
+        leftGroup.set(0.65);
+        rightGroup.set(0.6);
+        delivery.set(0);
+        System.out.println("Running Step 3...");
+      } else if(timer.get() < 7.2) {
+        //pause 
+        leftGroup.set(0);
+        rightGroup.set(0);
+        System.out.println("Running Step 4...");
+      } else if(timer.get() < 8.5) {
+        //backwards straight
+        leftGroup.set(-0.60);
+        rightGroup.set(-0.5);
+        System.out.println("Running Step 5...");
+      } else if(timer.get() < 9.5) {
+        //drift to hub
+        leftGroup.set(0);
+        rightGroup.set(0);
+        System.out.println("Running Step 6...");
+      } else if(timer.get() < 11.9) {
+        //stop at hub, deliver balls
+        leftGroup.set(0);
+        rightGroup.set(0);
+        delivery.set(0.8);
+        System.out.println("Running Step 7...");
+      } else if(timer.get() < 12.9) {
+        //drive out off the tarmac
+        leftGroup.set(0.6);
+        rightGroup.set(0.6);
+        delivery.set(0);
+        intake.set(0);
+        System.out.println("Running Step 8...");
+      } else if (timer.get() > 12.9){
+        leftGroup.set(0);
+        rightGroup.set(0);
+        System.out.println("Finished");
+      }
+    } if(auton == 6) {
+      //instant deliver and out
+      if(timer.get() < 5) {
+        leftGroup.set(0);
+        rightGroup.set(0); 
+        delivery.set(0);
+      } else if(timer.get() < 6.4) { 
+        delivery.set(0.8);
+      } else if(timer.get() < 7.8) {
+        leftGroup.set(0.45);
+        rightGroup.set(0.45); 
+        delivery.set(0);
+      } else {
+        leftGroup.set(0);
+        rightGroup.set(0); 
+      }
+    } else {
+      System.out.println("Auton int is bad!");
+    }
+  }
+}
